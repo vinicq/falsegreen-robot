@@ -55,8 +55,11 @@ RESTinstance schema keywords, DatabaseLibrary `Row Count Should Be Equal`, custo
 | C21 | low  | verification only runs conditionally (inside `IF` / `Run Keyword If`) — it may never execute |
 | C32 | low  | skipped test (`robot:skip` / `Skip`) |
 | R1  | high | `Pass Execution` forces the test green regardless of any check |
+| R2  | low  | user keyword named like a verifier (`Verify`/`Assert`/`Should`...) but its body verifies nothing — a hollow oracle |
 
-Scans both `*** Test Cases ***` and `*** Tasks ***` (RPA suites use Tasks).
+Scans `*** Test Cases ***`, `*** Tasks ***` (RPA), and `*** Keywords ***` definitions in
+both `.robot` and `.resource` files. R2 catches the root cause of a missed C2b: a test
+calls `Verify Login` and looks protected, but that keyword never asserts anything.
 
 ### Opt-in: maintainability group (default off)
 

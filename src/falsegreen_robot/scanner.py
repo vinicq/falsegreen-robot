@@ -37,6 +37,7 @@ CASES = {
     "C21": ("verification only runs conditionally (inside IF / Run Keyword If) — it may never execute", "low", "J1"),
     "C32": ("skipped test (robot:skip / Skip) never runs", "low", "J1"),
     "R1":  ("Pass Execution forces the test to pass regardless of any check (forced green)", "high", "J1"),
+    "R2":  ("user keyword named like a verifier (Verify/Assert/Should...) but its body contains no verification — a hollow oracle", "low", "J1"),
     # --- diagnostic group (maintainability; default off, opt-in via --diagnostics) ---
     "D2":  ("control flow (IF/FOR/WHILE/TRY) at the test/task level — the guide advises against it", "off", "J4"),
     # --- coupling group (structure; default off, opt-in) ----------------------
@@ -182,6 +183,50 @@ class Finding:
                 "title": title, "detail": self.detail}
 
 
+def _name_implies_verification(name):
+    """A user-keyword name that promises to verify. 'Check' is excluded - it often
+    names a getter that returns a status for the caller to assert."""
+    n = _norm(name)
+    return "should" in n or n.startswith(("verify", "assert", "validate"))
+
+
+def _call_level_smells(file, owner, calls, findings):
+    """Per-call false-green checks shared by test cases, tasks, and user keywords:
+    C5 (always-true), C7 (self-compare), C16 (Sleep). Returns whether any keyword
+    call verifies something."""
+    has_verification = False
+    for c in calls:
+        kw, args = c.keyword, list(getattr(c, "args", []) or [])
+        ln = getattr(c, "lineno", 0) or 0
+        if _norm(kw) == "should be true" and args and _looks_constant_true(args[0]):
+            findings.append(Finding(file, ln, owner, "C5", "Should Be True on a constant"))
+            has_verification = True
+            continue
+        if _norm(kw) == "should be equal" and len(args) >= 2:
+            if args[0] == args[1]:
+                code = "C7" if args[0].startswith("${") else "C5"
+                findings.append(Finding(file, ln, owner, code, "both sides are identical"))
+            has_verification = True
+            continue
+        if _norm(kw) == "sleep":
+            findings.append(Finding(file, ln, owner, "C16"))
+        if is_verification(kw, args) or _rkif_verifies(c):
+            has_verification = True
+    return has_verification
+
+
+def analyze_keyword(file, kw, findings):
+    """Analyze a User Keyword definition (.robot Keywords section or .resource).
+    Flags call-level smells inside the body, and R2 when the keyword is named like a
+    verifier but verifies nothing (a hollow oracle used by tests)."""
+    name = getattr(kw, "name", "") or ""
+    line = getattr(kw, "lineno", 0) or 0
+    calls = list(_keyword_calls(kw))
+    has_verification = _call_level_smells(file, name, calls, findings)
+    if _name_implies_verification(name) and not has_verification:
+        findings.append(Finding(file, line, name, "R2"))
+
+
 def analyze_testcase(file, tc, findings):
     name = getattr(tc, "name", "") or ""
     line = getattr(tc, "lineno", 0) or 0
@@ -203,27 +248,7 @@ def analyze_testcase(file, tc, findings):
         findings.append(Finding(file, line, name, "C2"))
         return
 
-    has_verification = False
-    for c in calls:
-        kw, args = c.keyword, list(getattr(c, "args", []) or [])
-        ln = getattr(c, "lineno", line)
-        # C5 always-true
-        if _norm(kw) == "should be true" and args and _looks_constant_true(args[0]):
-            findings.append(Finding(file, ln, name, "C5", "Should Be True on a constant"))
-            has_verification = True
-            continue
-        if _norm(kw) == "should be equal" and len(args) >= 2:
-            if args[0] == args[1]:
-                # C7 self-compare (same operand) or C5 (equal literals)
-                code = "C7" if args[0].startswith("${") else "C5"
-                findings.append(Finding(file, ln, name, code, "both sides are identical"))
-            has_verification = True
-            continue
-        # C16 Sleep
-        if _norm(kw) == "sleep":
-            findings.append(Finding(file, ln, name, "C16"))
-        if is_verification(kw, args) or _rkif_verifies(c):
-            has_verification = True
+    has_verification = _call_level_smells(file, name, calls, findings)
 
     # diagnostic/coupling group (off by default; emitted always, filtered in scan)
     if _has_control_block(tc):
@@ -282,6 +307,9 @@ def analyze_file(path):
         def visit_Task(self, node):  # RPA suites use *** Tasks ***, not *** Test Cases ***
             analyze_testcase(path, node, self_findings)
 
+        def visit_Keyword(self, node):  # user keyword defs in .robot Keywords + .resource
+            analyze_keyword(path, node, self_findings)
+
     _V().visit(model)
     return findings
 
@@ -291,7 +319,7 @@ IGNORED_DIRS = {".git", ".tox", "venv", ".venv", "node_modules", "results", "out
 
 
 def is_robot_file(path):
-    return path.endswith(".robot")
+    return path.endswith((".robot", ".resource"))
 
 
 def discover(paths):

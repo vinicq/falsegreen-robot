@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `.resource` files and `*** Keywords ***` definitions are now scanned (in both `.robot`
+  and `.resource`). New code R2: a user keyword named like a verifier (Verify/Assert/Should)
+  whose body contains no verification — a hollow oracle, the root cause of missed C2b.
+  Call-level smells (C5/C7/C16) are also detected inside user keywords.
 - Three groups (`false-positive` / `diagnostic` / `coupling`), like the sibling scanners.
   Opt-in maintainability group (default off, `--diagnostics`): D2 (control flow at the
   test/task level), M2 (too many steps).

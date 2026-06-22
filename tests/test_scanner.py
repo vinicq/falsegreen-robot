@@ -225,6 +225,53 @@ Has Logic
     assert "D2" in on               # surfaced with --diagnostics
 
 
+def test_r2_hollow_verifier_keyword(tmp_path):
+    body = """\
+*** Keywords ***
+Verify Login Succeeded
+    Log    checking login
+    Click    id:next
+"""
+    assert "R2" in codes(tmp_path, body)
+
+
+def test_no_r2_when_verifier_keyword_asserts(tmp_path):
+    body = """\
+*** Keywords ***
+Verify Login Succeeded
+    Should Be Equal    ${status}    ok
+"""
+    assert "R2" not in codes(tmp_path, body)
+
+
+def test_action_keyword_not_flagged_as_r2(tmp_path):
+    body = """\
+*** Keywords ***
+Open The Application
+    Log    opening
+    Click    id:start
+"""
+    assert "R2" not in codes(tmp_path, body)
+
+
+def test_c5_inside_user_keyword(tmp_path):
+    body = """\
+*** Keywords ***
+Check Result
+    Should Be True    ${TRUE}
+"""
+    assert "C5" in codes(tmp_path, body)
+
+
+def test_resource_file_is_scanned(tmp_path):
+    body = """\
+*** Keywords ***
+Validate Order
+    Log    pretending to validate
+"""
+    assert "R2" in codes(tmp_path, body, name="keywords.resource")
+
+
 def test_custom_verify_keyword_counts_as_oracle(tmp_path):
     body = """\
 *** Test Cases ***
