@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "falsegreen-robot"
+version = "0.1.0"
+description = "Find Robot Framework tests that pass green without protecting anything: tests with no verification keyword, swallowed failures, always-true checks. Deterministic static scan, sibling of falsegreen (Python) and falsegreen-js (JS/TS)."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Vinicius Queiroz" }]
+keywords = ["robot-framework", "robotframework", "testing", "test-smells", "false-positive", "static-analysis", "code-quality"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Robot Framework",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = ["robotframework>=4.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/vinicq/falsegreen-robot"
+Issues = "https://github.com/vinicq/falsegreen-robot/issues"
+
+[project.scripts]
+falsegreen-robot = "falsegreen_robot.scanner:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/falsegreen_robot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
