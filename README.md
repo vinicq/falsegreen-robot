@@ -50,6 +50,7 @@ RESTinstance schema keywords, DatabaseLibrary `Row Count Should Be Equal`, custo
 | C2b | low  | runs keywords but no verification keyword (no oracle) |
 | C3  | high | `Run Keyword And Ignore Error`/`Return Status` swallows the failure, status never asserted |
 | C5  | high | always-true (`Should Be True  ${TRUE}`, `Should Be Equal` with equal literals) |
+| C6  | low  | weak check — `Should Be True` on a bare variable (truthiness only, not a comparison) |
 | C7  | high | self-compare (`Should Be Equal  ${x}  ${x}`) |
 | C16 | low  | `Sleep` used as synchronization (timing dependence) |
 | C21 | low  | verification only runs conditionally (inside `IF` / `Run Keyword If`) — it may never execute |

@@ -225,6 +225,25 @@ Has Logic
     assert "D2" in on               # surfaced with --diagnostics
 
 
+def test_c6_should_be_true_on_bare_variable(tmp_path):
+    body = """\
+*** Test Cases ***
+Weak Check
+    ${r}=    Get Status
+    Should Be True    ${r}
+"""
+    assert "C6" in codes(tmp_path, body)
+
+
+def test_no_c6_when_should_be_true_has_comparison(tmp_path):
+    body = """\
+*** Test Cases ***
+Real Check
+    Should Be True    ${count} > 0
+"""
+    assert "C6" not in codes(tmp_path, body)
+
+
 def test_r2_hollow_verifier_keyword(tmp_path):
     body = """\
 *** Keywords ***

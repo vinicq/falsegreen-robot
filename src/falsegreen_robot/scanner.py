@@ -15,6 +15,7 @@ Exit: 0 clean, 10 low-confidence only, 20 high-confidence present.
 import argparse
 import json
 import os
+import re
 import sys
 
 __version__ = "0.1.0"
@@ -32,6 +33,7 @@ CASES = {
     "C2b": ("runs keywords but no verification keyword (no oracle)", "low", "J1"),
     "C3":  ("Run Keyword And Ignore Error/Return Status swallows the failure and the status is never asserted", "high", "J1"),
     "C5":  ("always-true check (Should Be True ${TRUE} / Should Be Equal with equal literals)", "high", "J2"),
+    "C6":  ("weak check — Should Be True on a bare variable (truthiness only, not a comparison)", "low", "J4"),
     "C7":  ("self-compare (Should Be Equal ${x} ${x})", "high", "J2"),
     "C16": ("Sleep used as synchronization (result depends on timing)", "low", "J1"),
     "C21": ("verification only runs conditionally (inside IF / Run Keyword If) — it may never execute", "low", "J1"),
@@ -93,6 +95,15 @@ def is_swallow(keyword):
 
 def _looks_constant_true(arg):
     return _norm(arg) in ("${true}", "true", "1", "${1}")
+
+
+_BARE_VAR_RE = re.compile(r"^[\$@&]\{[^{}]+\}$")
+
+
+def _is_bare_variable(arg):
+    """True for a lone variable like ${x} (no comparison/expression) — a weak oracle
+    when passed to Should Be True (truthiness only)."""
+    return bool(_BARE_VAR_RE.match((arg or "").strip()))
 
 
 # --- AST walk over the Robot model -----------------------------------------
@@ -200,6 +211,10 @@ def _call_level_smells(file, owner, calls, findings):
         ln = getattr(c, "lineno", 0) or 0
         if _norm(kw) == "should be true" and args and _looks_constant_true(args[0]):
             findings.append(Finding(file, ln, owner, "C5", "Should Be True on a constant"))
+            has_verification = True
+            continue
+        if _norm(kw) == "should be true" and len(args) == 1 and _is_bare_variable(args[0]):
+            findings.append(Finding(file, ln, owner, "C6", "Should Be True on a bare variable (truthiness only)"))
             has_verification = True
             continue
         if _norm(kw) == "should be equal" and len(args) >= 2:
