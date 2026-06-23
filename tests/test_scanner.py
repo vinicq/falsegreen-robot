@@ -480,8 +480,9 @@ def test_level_e2e_wins_over_integration(tmp_path):
 def test_finding_dict_carries_level_and_fix(tmp_path):
     fs = _findings(tmp_path, _EMPTY_TEST)
     d = fs[0].dict()
+    assert d["code"] == "C2"
     assert d["level"] == "unit"
-    assert d["fix"]  # C2 has a remediation hint
+    assert d["fix"] == FIX_HINTS["C2"]  # the exact remediation, not just truthiness
 
 
 def test_render_text_shows_level_and_fix_and_summary(tmp_path):
