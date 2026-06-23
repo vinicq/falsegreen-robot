@@ -48,6 +48,9 @@ CASES = {
     "D2":  ("control flow (IF/FOR/WHILE/TRY) at the test/task level — the guide advises against it", "off", "J4"),
     # --- coupling group (structure; default off, opt-in) ----------------------
     "M2":  ("test/task has too many steps (the guide suggests max ~10)", "off", "J5"),
+    # --- project layer (config-audit only; emitted by --config-audit, never by
+    # the per-file scan). The suite reports green by run configuration. ---------
+    "PL9": ("skip-on-failure / noncritical in the run config turns a failing test into a non-fatal pass (legacy, removed in RF 4+)", "low", "J1"),
 }
 
 # Default thresholds for the opt-in groups (overridable later via config).
@@ -55,7 +58,9 @@ DIAGNOSTIC_THRESHOLDS = {"long_test_steps": 10}
 
 
 def group_of(code):
-    """false-positive (C*/R*) / diagnostic (D*) / coupling (M*) — mirrors the siblings."""
+    """false-positive (C*/R*) / diagnostic (D*) / coupling (M*) / project (PL*) — mirrors the siblings."""
+    if code.startswith("PL"):
+        return "project"
     if code.startswith("D"):
         return "diagnostic"
     if code.startswith("M"):
@@ -84,6 +89,7 @@ FIX_HINTS = {
     "R5":  "add data rows to the [Template], or remove the template",
     "D2":  "move control flow into a keyword; keep the test case flat",
     "M2":  "split the long test into focused cases or extract keywords",
+    "PL9": "remove --skiponfailure/--noncritical so a failing test fails the run",
 }
 
 # Test-pyramid level by imported library. A browser/mobile driver is E2E; an
@@ -577,6 +583,70 @@ def resolve_output_path(path, fmt):
     return path
 
 
+# ---------------------------------------------------------------------------
+# Project-layer audit (--config-audit): the suite reports green by run config,
+# not by a smell inside any one suite file. Reads the Robot run config.
+# ---------------------------------------------------------------------------
+def _read_toml_file(path):
+    try:
+        import tomllib as _t
+    except Exception:
+        try:
+            import tomli as _t
+        except Exception:
+            return None
+    try:
+        with open(path, "rb") as fh:
+            return _t.load(fh)
+    except Exception:
+        return None
+
+
+def audit_config(start=None):
+    """Project-layer audit: read the Robot run config (robot.toml, pyproject
+    [tool.robot]/[tool.robotframework], *.args argument files) and report PL9 -
+    a skip-on-failure / noncritical option that turns a failing test into a
+    non-fatal pass. Findings carry the config file and level 'project'.
+    Returns [] when no such config is found."""
+    import glob
+    base = start or os.getcwd()
+    findings = []
+
+    def _flag(path, detail=""):
+        f = Finding(path, 1, "", "PL9", detail)
+        f.level = "project"
+        findings.append(f)
+
+    toml_sources = (
+        ("robot.toml", lambda d: d),
+        ("pyproject.toml", lambda d: (d.get("tool", {}).get("robot")
+                                      or d.get("tool", {}).get("robotframework") or {})),
+    )
+    for name, getter in toml_sources:
+        path = os.path.join(base, name)
+        if not os.path.isfile(path):
+            continue
+        data = _read_toml_file(path)
+        if data is None:
+            continue
+        section = getter(data) or {}
+        keys = {str(k).replace("-", "").replace("_", "").lower() for k in section}
+        if {"skiponfailure", "noncritical"} & keys:
+            _flag(path, "skip-on-failure/noncritical in %s" % name)
+            return findings
+
+    for argfile in sorted(glob.glob(os.path.join(base, "*.args"))):
+        try:
+            with open(argfile, "r", encoding="utf-8") as fh:
+                text = fh.read()
+        except Exception:
+            continue
+        if re.search(r"--(skiponfailure|noncritical)\b", text):
+            _flag(argfile, "skip-on-failure/noncritical in argument file")
+            return findings
+    return findings
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="rffalsegreen",
                                 description="Find false-positive Robot Framework tests (static).")
@@ -585,12 +655,31 @@ def main(argv=None):
     p.add_argument("--output", default=None, metavar="PATH",
                    help="write the output to PATH instead of stdout; "
                         "a directory (e.g. .falsegreen/) gets report.<ext>")
+    p.add_argument("--config-audit", action="store_true",
+                   help="audit the Robot run config (robot.toml / argument files) for "
+                        "project-layer false-green (PL codes) instead of scanning suites")
     p.add_argument("--disable", default="", help="comma-separated codes to turn off")
     p.add_argument("--diagnostics", action="store_true",
                    help="also report the opt-in maintainability group (D*/M*)")
     p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
     disable = {c.strip() for c in args.disable.split(",") if c.strip()}
+    if args.config_audit:
+        base = next((d for d in (args.paths or ["."]) if os.path.isdir(d)), os.getcwd())
+        findings = audit_config(base)
+        if args.json:
+            rendered = json.dumps({"tool": "robotframework-falsegreen", "version": __version__,
+                                   "judgments": JUDGMENTS,
+                                   "findings": [f.dict() for f in findings]}, indent=2)
+        else:
+            rendered = _render_text(findings)
+        if args.output:
+            dest = resolve_output_path(args.output, "json" if args.json else "text")
+            with open(dest, "w", encoding="utf-8") as fh:
+                fh.write(rendered + "\n")
+        else:
+            print(rendered)
+        return 10 if findings else 0
     findings = scan(args.paths or ["."], disable=disable, diagnostics=args.diagnostics)
     if args.json:
         rendered = json.dumps({"tool": "robotframework-falsegreen", "version": __version__,
