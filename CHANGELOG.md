@@ -17,6 +17,12 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `--config-audit` mode (project layer): reads the Robot run config (`robot.toml`,
+  `pyproject.toml` `[tool.robot]`, `*.args` argument files) and reports PL9 - a
+  `--skiponfailure`/`--noncritical` option that turns a failing test into a non-fatal pass
+  (legacy, removed in RF 4+). Findings carry level `project` and a fix hint. TOML sources need
+  a TOML reader (`tomllib` on 3.11+, else `tomli`); the `*.args` scan works on every version.
+  README notes that Robot has no standard mutation tester, so the F7 layer is manual review.
 - New codes: R3 (`*** Test Cases ***` inside a `.resource` file), R4 (`No Operation` as the
   only step), R5 (`[Template]` with no data rows). C2 now also flags an empty user keyword
   (only settings, no steps). C23 (low): a hard-coded IP-address URL in test data, restricted
