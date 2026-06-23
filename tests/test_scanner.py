@@ -1,4 +1,5 @@
 """Tests for robotframework-falsegreen. Each fixture is a tiny .robot file."""
+import pytest
 import json
 
 from falsegreen_robot.scanner import (
@@ -523,3 +524,59 @@ def test_resolve_output_path_dir_vs_file(tmp_path):
     assert d.endswith("report.json")
     fpath = resolve_output_path(str(tmp_path / "r.txt"), "text")
     assert fpath.endswith("r.txt")
+
+
+# --- PL9 config-audit: project-layer (Robot run config) ----------------------
+
+import importlib.util  # noqa: E402
+from falsegreen_robot.scanner import audit_config  # noqa: E402
+
+_HAS_TOML = bool(importlib.util.find_spec("tomllib") or importlib.util.find_spec("tomli"))
+
+
+def test_config_audit_flags_skiponfailure_in_args(tmp_path):
+    (tmp_path / "run.args").write_text("--skiponfailure flaky\n--outputdir out\n", encoding="utf-8")
+    fs = audit_config(str(tmp_path))
+    assert [f.code for f in fs] == ["PL9"]
+
+
+def test_config_audit_flags_noncritical_in_args(tmp_path):
+    (tmp_path / "ci.args").write_text("--noncritical wip\n", encoding="utf-8")
+    assert {f.code for f in audit_config(str(tmp_path))} == {"PL9"}
+
+
+def test_config_audit_clean_args(tmp_path):
+    (tmp_path / "run.args").write_text("--outputdir out\n--loglevel DEBUG\n", encoding="utf-8")
+    assert audit_config(str(tmp_path)) == []
+
+
+def test_config_audit_no_config_is_empty(tmp_path):
+    (tmp_path / "suite.robot").write_text("*** Test Cases ***\nT\n    Should Be Equal    1    1\n", encoding="utf-8")
+    assert audit_config(str(tmp_path)) == []
+
+
+def test_config_audit_finding_level_and_fix(tmp_path):
+    (tmp_path / "run.args").write_text("--skiponfailure x\n", encoding="utf-8")
+    d = audit_config(str(tmp_path))[0].dict()
+    assert d["level"] == "project"
+    assert d["fix"] == "remove --skiponfailure/--noncritical so a failing test fails the run"
+
+
+@pytest.mark.skipif(not _HAS_TOML, reason="no TOML reader (tomllib is 3.11+, tomli not installed)")
+def test_config_audit_robot_toml_skip_on_failure(tmp_path):
+    (tmp_path / "robot.toml").write_text('skip-on-failure = ["flaky"]\n', encoding="utf-8")
+    assert {f.code for f in audit_config(str(tmp_path))} == {"PL9"}
+
+
+def test_config_audit_cli_exit_and_output(tmp_path):
+    (tmp_path / "run.args").write_text("--skiponfailure x\n", encoding="utf-8")
+    out = tmp_path / "rep.json"
+    rc = main(["--config-audit", "--json", "--output", str(out), str(tmp_path)])
+    assert rc == 10
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["findings"][0]["code"] == "PL9"
+
+
+def test_pl9_in_catalog_and_fix_hints():
+    from falsegreen_robot.scanner import CASES, FIX_HINTS
+    assert "PL9" in CASES and "PL9" in FIX_HINTS

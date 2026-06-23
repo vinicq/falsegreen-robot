@@ -32,10 +32,15 @@ rffalsegreen tests/           # scan a path
 rffalsegreen --json           # machine-readable output
 rffalsegreen --output report.json   # write to a file
 rffalsegreen --output .falsegreen/  # write report.<ext> into a directory
+rffalsegreen --config-audit   # audit the Robot run config (project-layer PL codes)
 rffalsegreen --disable C16    # turn off specific codes
 ```
 
 Each finding is reported with its pyramid level (unit / integration / e2e, read from the suite's imported libraries) and a one-line fix hint, and the summary breaks the findings down by level and lists the most common fixes. `--output` takes a file or a directory: an extension-less or trailing-slash path (e.g. `.falsegreen/`) receives `report.<ext>` for the chosen format. Reports are run artifacts; keep the output directory gitignored.
+
+`--config-audit` is a separate mode: instead of scanning suites, it reads the Robot run config (`robot.toml`, `pyproject.toml` `[tool.robot]`, `*.args` argument files) and reports `PL9` - a `--skiponfailure` / `--noncritical` option that turns a failing test into a non-fatal pass (legacy, removed in RF 4+). The per-file scan cannot see run config.
+
+For the layer no static scan reaches (does a green test fail when the code is wrong?), Robot has no standard mutation tester, so that check is manual review; the semantic [falsegreen-skill](https://github.com/vinicq/falsegreen-skill) covers the intent-level cases.
 
 Exit code: `0` clean, `10` low-confidence only, `20` high-confidence present. Wire exit
 `20` into CI to block the merge.
