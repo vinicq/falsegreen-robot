@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-23
+
 ### Changed
 
 - **Renamed to `robotframework-falsegreen`** to fit the Robot Framework ecosystem. The PyPI
@@ -61,5 +63,6 @@ All notable changes to this project are documented here. The format is based on
   `Verify*`/`Assert*`/`Validate*`/`Check *` keywords.
 - CLI: paths, `--json`, `--disable`, `--version`. Exit codes 0/10/20.
 
-[Unreleased]: https://github.com/vinicq/robotframework-falsegreen/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/vinicq/robotframework-falsegreen/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/vinicq/robotframework-falsegreen/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vinicq/robotframework-falsegreen/releases/tag/v0.1.0
