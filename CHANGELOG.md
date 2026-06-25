@@ -43,6 +43,14 @@ All notable changes to this project are documented here. The format is based on
   - so it survives edits that shift a test up or down the file. `--write-baseline` records the
   current findings and exits 0; `--baseline` suppresses every recorded fingerprint.
 
+### Changed
+
+- Repo community hygiene now matches the `falsegreen` template: README status badges (CI, PyPI,
+  Python versions, License), issue templates (`bug_report`, `feature_request`, `config`), a pull
+  request template, `CODEOWNERS`, Dependabot for `pip` and `github-actions`, and a release-drafter
+  config plus workflow. The release-drafter job is skipped on PRs from forks, where it cannot write.
+  (issue #21)
+
 ## [0.2.0] - 2026-06-23
 
 ### Changed
