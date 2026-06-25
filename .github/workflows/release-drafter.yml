@@ -1,0 +1,24 @@
+name: release-drafter
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  update_release_draft:
+    # Skip on PRs from forks: the draft-write step needs a token with write
+    # permission, which fork PRs do not get. Running it there only fails red.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
