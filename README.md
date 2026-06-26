@@ -3,7 +3,9 @@
 [![CI](https://github.com/vinicq/robotframework-falsegreen/actions/workflows/ci.yml/badge.svg)](https://github.com/vinicq/robotframework-falsegreen/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/robotframework-falsegreen.svg)](https://pypi.org/project/robotframework-falsegreen/)
 [![Python](https://img.shields.io/pypi/pyversions/robotframework-falsegreen.svg)](https://pypi.org/project/robotframework-falsegreen/)
+[![Downloads](https://img.shields.io/pypi/dm/robotframework-falsegreen.svg)](https://pypistats.org/packages/robotframework-falsegreen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **One problem, one tool: the false positive.** robotframework-falsegreen finds Robot Framework
 tests that pass green without protecting anything - tests that let broken behavior
