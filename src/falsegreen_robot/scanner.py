@@ -143,6 +143,12 @@ REST_SCHEMA = {"Integer", "Number", "String", "Boolean", "Object", "Array", "Nul
 BROWSER_OPS = {"==", "!=", "contains", "not contains", "validate", "matches",
                ">", "<", ">=", "<=", "*=", "^=", "$=", "then"}
 VERIFY_PREFIXES = ("verify", "assert", "validate", "check ")
+# RequestsLibrary HTTP method keywords (with or without the " On Session" form).
+# A request carrying expected_status=<specific code/name> asserts the status: the
+# call fails when the response status differs, so it is a real oracle.
+HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
+# expected_status values that DISABLE the check (no oracle): the request accepts any outcome.
+_EXPECTED_STATUS_OFF = {"any", "anything"}
 SWALLOW_KEYWORDS = {"run keyword and ignore error", "run keyword and return status"}
 # Keywords that end the current block: nothing after them in the same body runs.
 # A test case cannot use [Return], so the test-level terminators are the keywords
@@ -179,6 +185,14 @@ def is_verification(keyword, args):
         return True                              # Selenium/Appium waits that fail on timeout
     if n.startswith("get ") and any(a in BROWSER_OPS for a in (args or ())):
         return True                              # Browser assertion engine: Get ... == expected
+    # RequestsLibrary: GET/POST/... (optionally "On Session") with a specific
+    # expected_status asserts the response status. expected_status=any/anything
+    # disables it, so that form is NOT an oracle.
+    if n.replace(" on session", "") in HTTP_METHODS:
+        for a in args or ():
+            key, sep, val = (a or "").partition("=")
+            if sep and _norm(key) == "expected_status":
+                return _norm(val) not in _EXPECTED_STATUS_OFF and bool(val.strip())
     return False
 
 

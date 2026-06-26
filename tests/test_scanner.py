@@ -51,6 +51,59 @@ No Oracle
     assert "C2b" in codes(tmp_path, body)
 
 
+def test_c2b_not_flagged_on_expected_status(tmp_path):
+    # RequestsLibrary expected_status=<code> IS an oracle: the request fails if
+    # the status differs. Must NOT be flagged C2b.
+    body = """\
+*** Settings ***
+Library    RequestsLibrary
+
+*** Test Cases ***
+Get Users Returns 200
+    GET    https://api.example.com/users    expected_status=200
+"""
+    assert "C2b" not in codes(tmp_path, body)
+
+
+def test_c2b_flagged_on_expected_status_any(tmp_path):
+    # expected_status=any disables the check: no oracle, still C2b.
+    body = """\
+*** Settings ***
+Library    RequestsLibrary
+
+*** Test Cases ***
+Status Disabled
+    GET    https://api.example.com/users    expected_status=any
+"""
+    assert "C2b" in codes(tmp_path, body)
+
+
+def test_c2b_flagged_on_request_without_expected_status(tmp_path):
+    # A bare request with no explicit status oracle is still C2b.
+    body = """\
+*** Settings ***
+Library    RequestsLibrary
+
+*** Test Cases ***
+Bare Get
+    GET    https://api.example.com/users
+"""
+    assert "C2b" in codes(tmp_path, body)
+
+
+def test_c2b_not_flagged_on_expected_status_on_session(tmp_path):
+    # The "On Session" form carries expected_status too.
+    body = """\
+*** Settings ***
+Library    RequestsLibrary
+
+*** Test Cases ***
+Get On Session Returns 200
+    GET On Session    api    /users    expected_status=200
+"""
+    assert "C2b" not in codes(tmp_path, body)
+
+
 def test_c3_swallowed_failure(tmp_path):
     body = """\
 *** Test Cases ***
