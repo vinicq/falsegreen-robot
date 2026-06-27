@@ -977,6 +977,39 @@ Expects The Literal Star Message
     assert "C9" not in codes(tmp_path, body)
 
 
+def test_c9_expect_error_regexp_catch_all(tmp_path):
+    # A REGEXP catch-all (.* / .+ / ^.*$) matches any message, so the oracle is
+    # vacuous just like the glob star - C9.
+    for pat in ("REGEXP:.*", "REGEXP:.+", "REGEXP:^.*$", "REGEXP:(.*)", "REGEXP:.*?"):
+        body = f"""\
+*** Test Cases ***
+Expects Any Error Via Regex
+    Run Keyword And Expect Error    {pat}    Do Risky Thing
+"""
+        assert "C9" in codes(tmp_path, body), pat
+
+
+def test_no_c9_when_expect_error_regexp_is_specific(tmp_path):
+    # A specific regex (anchored to a real message) is a real oracle, not a catch-all.
+    body = """\
+*** Test Cases ***
+Expects A Specific Error
+    Run Keyword And Expect Error    REGEXP:ValueError: .*    Do Risky Thing
+"""
+    assert "C9" not in codes(tmp_path, body)
+
+
+def test_no_c9_when_bare_dot_star_is_glob(tmp_path):
+    # A bare `.*` (no REGEXP: prefix) is glob, where `.` is literal, so it only
+    # matches messages starting with a dot - not a catch-all.
+    body = """\
+*** Test Cases ***
+Glob Dot Star
+    Run Keyword And Expect Error    .*    Do Risky Thing
+"""
+    assert "C9" not in codes(tmp_path, body)
+
+
 # C20: verification after a terminator ([Return]/Fail/Return From Keyword).
 
 def test_c20_verification_after_return_in_keyword(tmp_path):

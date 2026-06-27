@@ -37,7 +37,7 @@ CASES = {
     "C5":  ("always-true check (Should Be True ${TRUE} / Should Be Equal with equal literals)", "high", "J2"),
     "C6":  ("weak check — Should Be True on a bare variable (truthiness only, not a comparison)", "low", "J4"),
     "C7":  ("self-compare (Should Be Equal ${x} ${x})", "high", "J2"),
-    "C9":  ("Run Keyword And Expect Error with a catch-all pattern (* / EQUALS:* — accepts any error)", "low", "J4"),
+    "C9":  ("Run Keyword And Expect Error with a catch-all pattern (*, GLOB:*, or REGEXP:.* accepts any error)", "low", "J4"),
     "C20": ("verification after a [Return]/Return/Fail/Pass Execution in the same block — dead step that never runs", "high", "J1"),
     "C37": ("duplicate data row in a [Template] — the same scenario runs twice, adds no coverage", "low", "J4"),
     "CC":  ("commented-out verification keyword (# Should Be Equal ...) — the oracle is switched off", "low", "J1"),
@@ -173,6 +173,11 @@ _CONST_TRUE_GUARDS = {"true", "${true}", "1"}
 # none of those is a catch-all. Matching any error makes the oracle vacuous - it
 # never tells a real failure from a typo.
 _CATCH_ALL_ERROR_RE = re.compile(r"^(?:GLOB:\s*)?\*+$", re.IGNORECASE)
+# The regex form of the same vacuous oracle: REGEXP: followed by a pattern that
+# matches every message (`.*`, `.+`, lazy `.*?`, with optional anchors/parens),
+# e.g. `REGEXP:.*` or `REGEXP:^.*$`. A bare `.*` is NOT this: without REGEXP: it is
+# glob, where `.` is literal, so it only matches messages starting with a dot.
+_CATCH_ALL_REGEXP_RE = re.compile(r"^REGEXP:\s*\^?\(?\.[*+]\??\)?\$?$", re.IGNORECASE)
 
 
 def _norm(name):
@@ -544,7 +549,8 @@ def _call_level_smells(file, owner, calls, findings):
             has_verification = True
             continue
         if _norm(kw) == "run keyword and expect error" and args \
-                and _CATCH_ALL_ERROR_RE.match((args[0] or "").strip()):
+                and (_CATCH_ALL_ERROR_RE.match((args[0] or "").strip())
+                     or _CATCH_ALL_REGEXP_RE.match((args[0] or "").strip())):
             findings.append(Finding(file, ln, owner, "C9", "expects any error (catch-all pattern)"))
             has_verification = True
             continue
