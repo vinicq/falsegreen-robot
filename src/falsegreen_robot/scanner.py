@@ -1383,13 +1383,32 @@ def load_project_config(start=None):
     return out
 
 
+def _discover_argfiles(base):
+    """Yield every `*.args` under base, recursively, skipping IGNORED_DIRS (the same
+    set file discovery uses, so .git/.venv/results/output/... are not scanned). A
+    nested `tests/sub/run.args` is read; an artifact `results/x.args` is not.
+
+    ponytail: settings in a suite-init `__init__.robot` are out of scope - the
+    PL9 audit reads the run CONFIG layer (robot.toml / *.args), not suite source.
+    A `__init__.robot` carrying skip metadata is a suite-source concern the
+    per-file scan would own; parsing it here would mix the two layers. Documented,
+    not half-built."""
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in IGNORED_DIRS]
+        for f in filenames:
+            if f.endswith(".args"):
+                yield os.path.join(dirpath, f)
+
+
 def audit_config(start=None):
     """Project-layer audit: read the Robot run config (robot.toml, pyproject
-    [tool.robot]/[tool.robotframework], *.args argument files) and report PL9 -
-    a skip-on-failure / noncritical option that turns a failing test into a
-    non-fatal pass. Findings carry the config file and level 'project'.
-    Returns [] when no such config is found."""
-    import glob
+    [tool.robot]/[tool.robotframework], *.args argument files - walked recursively,
+    skipping IGNORED_DIRS) and report PL9 - a skip-on-failure / noncritical option
+    that turns a failing test into a non-fatal pass. Findings carry the config file
+    and level 'project'. Returns [] when no such config is found.
+
+    Suite-init (`__init__.robot`) settings are out of scope on purpose: this audits
+    the run-config layer, not suite source. See _discover_argfiles."""
     base = start or os.getcwd()
     findings = []
 
@@ -1416,7 +1435,7 @@ def audit_config(start=None):
             _flag(path, "skip-on-failure/noncritical in %s" % name)
             return findings
 
-    for argfile in sorted(glob.glob(os.path.join(base, "*.args"))):
+    for argfile in sorted(_discover_argfiles(base)):
         try:
             with open(argfile, "r", encoding="utf-8") as fh:
                 text = fh.read()

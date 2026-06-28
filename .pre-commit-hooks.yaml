@@ -1,0 +1,6 @@
+- id: rffalsegreen
+  name: rffalsegreen (false-green Robot Framework tests)
+  entry: rffalsegreen
+  language: python
+  files: \.(robot|resource)$
+  pass_filenames: true

@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- pre-commit hook (#51): a `.pre-commit-hooks.yaml` exposing the `rffalsegreen` hook, scoped
+  to `.robot`/`.resource` files. It passes the staged paths to the scanner, so it does not
+  re-scan `results/`/`output/`, and honors the exit codes (`0`/`10`/`20`). The README
+  pre-commit subsection has the consumer `repo:`/`rev:` snippet.
 - Project config file (#50): `[tool.falsegreen]` in `pyproject.toml`, or a whole-file
   `.falsegreen.toml` root table when there is no `[tool.falsegreen]` (first found wins, no
   merge). Four keys: `disable` (codes, additive with `--disable`), `diagnostics` (bool, OR
@@ -39,6 +43,10 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
+- `--config-audit` now walks `*.args` argument files recursively, skipping ignored directories
+  (`.git`, `.venv`, `results`, `output`, the same set file discovery uses). A `--skiponfailure`
+  / `--noncritical` flag set in a nested argument file below the root is no longer missed, while
+  an argfile inside `results/`/`output/` stays skipped as a run artifact (#52).
 - `C5` broadened (#47): a `Set Variable If` with a constant-true guard whose assigned value
   flows into the expected side of a later `Should Be Equal` is now flagged. The oracle is
   pinned to a constant the test fixed, so the comparison is a tautology. A runtime-variable
