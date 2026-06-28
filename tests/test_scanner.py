@@ -1670,3 +1670,263 @@ def test_version_lockstep():
     assert __version__ == pyproject_v == cff_v, (
         "version lockstep broken: __version__=%s pyproject=%s CITATION=%s"
         % (__version__, pyproject_v, cff_v))
+
+
+# --- #47: C5 broadened — constant-true Set Variable If pins the expected oracle ---
+
+def test_c5_set_variable_if_const_true_pins_expected(tmp_path):
+    # The expected side is fixed to a constant the test chose via a const-true guard:
+    # Should Be Equal then compares against that pinned constant - a tautology dressed up.
+    body = """\
+*** Test Cases ***
+Pins The Oracle
+    ${expected}=    Set Variable If    ${TRUE}    100
+    ${actual}=    Compute Total
+    Should Be Equal    ${actual}    ${expected}
+"""
+    assert "C5" in codes(tmp_path, body)
+
+
+def test_no_c5_for_set_variable_if_with_runtime_guard(tmp_path):
+    # One token away: a runtime-variable guard is normal branching, not a pinned
+    # constant. The detector requires a literal constant-true guard, so this is quiet.
+    body = """\
+*** Test Cases ***
+Real Branch
+    ${expected}=    Set Variable If    ${ready}    100    200
+    ${actual}=    Compute Total
+    Should Be Equal    ${actual}    ${expected}
+"""
+    assert "C5" not in codes(tmp_path, body)
+
+
+def test_no_c5_when_set_variable_if_value_not_used_as_expected(tmp_path):
+    # Const-true guard, but the assigned value never reaches an assertion's expected
+    # side - the flow is not proven, so the detector stays silent.
+    body = """\
+*** Test Cases ***
+Unused Pin
+    ${pinned}=    Set Variable If    ${TRUE}    100
+    Log    ${pinned}
+    Should Be Equal    ${actual}    ${other}
+"""
+    assert "C5" not in codes(tmp_path, body)
+
+
+# --- #53: C44 — library assertion provably true for any value -----------------
+
+def test_c44_should_contain_empty_string(tmp_path):
+    # Every string contains the empty string, so the assertion can never fail.
+    body = """\
+*** Test Cases ***
+Contains Empty
+    Should Contain    ${result}    ${EMPTY}
+"""
+    assert "C44" in codes(tmp_path, body)
+
+
+def test_no_c44_should_contain_two_free_variables(tmp_path):
+    # One token away: two free variables is a real containment check (FP ceiling).
+    body = """\
+*** Test Cases ***
+Contains Something
+    Should Contain    ${result}    ${needle}
+"""
+    assert "C44" not in codes(tmp_path, body)
+
+
+def test_c44_should_not_be_empty_on_constant(tmp_path):
+    # A constant is never empty, so Should Not Be Empty on it is vacuous.
+    body = """\
+*** Test Cases ***
+Never Empty
+    Should Not Be Empty    ${TRUE}
+"""
+    assert "C44" in codes(tmp_path, body)
+
+
+def test_no_c44_should_not_be_empty_on_variable(tmp_path):
+    # A runtime variable can be empty, so the check is real - not C44.
+    body = """\
+*** Test Cases ***
+Maybe Empty
+    Should Not Be Empty    ${response}
+"""
+    assert "C44" not in codes(tmp_path, body)
+
+
+def test_c44_should_be_empty_on_empty_literal(tmp_path):
+    # The empty literal is always empty, so the assertion never fails.
+    body = """\
+*** Test Cases ***
+Always Empty
+    Should Be Empty    ${EMPTY}
+"""
+    assert "C44" in codes(tmp_path, body)
+
+
+def test_no_c44_should_be_empty_on_variable(tmp_path):
+    body = """\
+*** Test Cases ***
+Real Empty Check
+    Should Be Empty    ${trailing}
+"""
+    assert "C44" not in codes(tmp_path, body)
+
+
+def test_c44_length_should_be_empty_zero(tmp_path):
+    # The empty literal has length 0, so the assertion is a tautology.
+    body = """\
+*** Test Cases ***
+Empty Has Length Zero
+    Length Should Be    ${EMPTY}    0
+"""
+    assert "C44" in codes(tmp_path, body)
+
+
+def test_c44_length_should_be_after_literal_set_variable(tmp_path):
+    # The subject was assigned a literal by an immediately-preceding Set Variable, and
+    # the expected length matches that literal's length - vacuous (form 4).
+    body = """\
+*** Test Cases ***
+Fixed Length
+    ${s}=    Set Variable    hello
+    Length Should Be    ${s}    5
+"""
+    assert "C44" in codes(tmp_path, body)
+
+
+def test_no_c44_length_should_be_on_runtime_subject(tmp_path):
+    # One token away: the subject is a runtime value (Get Text), so the length check
+    # is real. The in-body literal trace does not fire.
+    body = """\
+*** Test Cases ***
+Real Length Check
+    ${s}=    Get Text    sel
+    Length Should Be    ${s}    5
+"""
+    assert "C44" not in codes(tmp_path, body)
+
+
+def test_should_be_true_empty_is_not_c44(tmp_path):
+    # Should Be True ${EMPTY} is R6/C6 territory (bare variable), never C44.
+    cs = codes(tmp_path, """\
+*** Test Cases ***
+T
+    Should Be True    ${EMPTY}
+""")
+    assert "C44" not in cs
+
+
+def test_c44_in_catalog_and_fix_hints():
+    assert "C44" in CASES and "C44" in FIX_HINTS
+    assert CASES["C44"][1] == "high" and CASES["C44"][2] == "J2"
+
+
+# --- #50: project config file ([tool.falsegreen] / .falsegreen.toml) ----------
+
+from falsegreen_robot.scanner import load_project_config  # noqa: E402
+
+_SLEEPY = """\
+*** Test Cases ***
+Sleepy
+    Sleep    1s
+    Should Be Equal    ${a}    ${b}
+"""
+
+
+def test_config_disable_from_pyproject(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.falsegreen]\ndisable = ["C16"]\n', encoding="utf-8")
+    (tmp_path / "t.robot").write_text(_SLEEPY, encoding="utf-8")
+    rc = main([str(tmp_path)])
+    # C16 was the only finding; disabled via config -> clean run
+    assert rc == 0
+
+
+def test_config_disable_from_dotfile(tmp_path):
+    (tmp_path / ".falsegreen.toml").write_text('disable = ["C16"]\n', encoding="utf-8")
+    cfg = load_project_config(str(tmp_path))
+    assert cfg["disable"] == {"C16"}
+
+
+def test_config_pyproject_wins_over_dotfile(tmp_path):
+    # First found wins, no merge: pyproject [tool.falsegreen] is read, .falsegreen.toml ignored.
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.falsegreen]\ndisable = ["C16"]\n', encoding="utf-8")
+    (tmp_path / ".falsegreen.toml").write_text('disable = ["C2"]\n', encoding="utf-8")
+    cfg = load_project_config(str(tmp_path))
+    assert cfg["disable"] == {"C16"}
+
+
+def test_config_diagnostics_on(tmp_path):
+    (tmp_path / ".falsegreen.toml").write_text("diagnostics = true\n", encoding="utf-8")
+    cfg = load_project_config(str(tmp_path))
+    assert cfg["diagnostics"] is True
+
+
+def test_config_long_test_overrides_threshold(tmp_path):
+    (tmp_path / ".falsegreen.toml").write_text("long_test = 3\n", encoding="utf-8")
+    cfg = load_project_config(str(tmp_path))
+    assert cfg["long_test"] == 3
+    # threaded as a parameter (not a mutated global): a 4-step test trips M2 at threshold 3
+    steps = "\n".join("    Log    step %d" % i for i in range(4))
+    body = "*** Test Cases ***\nLongish\n%s\n    Should Be Equal    ${a}    ${b}\n" % steps
+    f = tmp_path / "s.robot"
+    f.write_text(body, encoding="utf-8")
+    on = {x.code for x in scan([str(f)], diagnostics=True, long_test=cfg["long_test"])}
+    assert "M2" in on
+    # the module global is untouched
+    from falsegreen_robot.scanner import DIAGNOSTIC_THRESHOLDS
+    assert DIAGNOSTIC_THRESHOLDS["long_test_steps"] == 10
+
+
+def test_config_unknown_key_warns_to_stderr(tmp_path, capsys):
+    (tmp_path / ".falsegreen.toml").write_text(
+        'bogus_key = 1\ndisable = ["NOPE"]\n', encoding="utf-8")
+    load_project_config(str(tmp_path))
+    err = capsys.readouterr().err
+    assert "unknown config key 'bogus_key'" in err
+    assert "unknown code 'NOPE'" in err
+
+
+def test_config_absent_is_default(tmp_path):
+    cfg = load_project_config(str(tmp_path))
+    assert cfg == {"disable": set(), "diagnostics": False,
+                   "long_test": None, "verify_keywords": []}
+
+
+# --- #54: config-declared custom verification patterns ------------------------
+
+def test_verify_keywords_suppresses_c2b(tmp_path):
+    # A custom verifier named via config suppresses the C2b that fires without it.
+    body = """\
+*** Test Cases ***
+Uses A Custom Verifier
+    Do Login
+    Confirm Balance    100
+"""
+    f = tmp_path / "t.robot"
+    f.write_text(body, encoding="utf-8")
+    assert "C2b" in {x.code for x in scan([str(f)])}
+    assert "C2b" not in {x.code for x in scan([str(f)], extra_verify={"confirm"})}
+
+
+def test_verify_keywords_matches_full_normalized_name_not_leaf(tmp_path):
+    # `Expect Response Ok` matches the pattern `expect response` as a substring of the
+    # FULL normalized name, not a split leaf.
+    assert is_verification("Expect Response Ok", [], None, {"expect response"}) is True
+    assert is_verification("Do Something Else", [], None, {"expect response"}) is False
+
+
+def test_verify_keywords_empty_set_is_byte_identical(tmp_path):
+    # Opt-in: no patterns -> identical behavior (the custom verifier is not recognized).
+    body = """\
+*** Test Cases ***
+No Custom Verifier
+    Do Login
+    Confirm Balance    100
+"""
+    f = tmp_path / "t.robot"
+    f.write_text(body, encoding="utf-8")
+    assert {x.code for x in scan([str(f)])} == {x.code for x in scan([str(f)], extra_verify=set())}

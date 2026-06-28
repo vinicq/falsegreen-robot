@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Project config file (#50): `[tool.falsegreen]` in `pyproject.toml`, or a whole-file
+  `.falsegreen.toml` root table when there is no `[tool.falsegreen]` (first found wins, no
+  merge). Four keys: `disable` (codes, additive with `--disable`), `diagnostics` (bool, OR
+  with `--diagnostics`), `long_test` (int, overrides the long-test step threshold), and
+  `verify_keywords` (custom verifier patterns, see below). Unknown keys and codes warn to
+  stderr and are skipped; the run does not fail. CLI flags override or extend the file. This
+  is separate from `--config-audit`, which reads the Robot run config (`[tool.robot]`).
+- `verify_keywords` config (#54): custom verification-keyword patterns. A keyword whose full
+  normalized name contains one of the patterns counts as an oracle, so `Confirm Balance` or
+  `Expect Response Ok` no longer surface as false `C2b`/`C21`/`R2`/`R7`. Opt-in: with no
+  patterns the behavior is unchanged. The match only suppresses a false positive, it never
+  creates a finding.
+- `C44` (high): a library assertion provably true for any runtime value. Covers
+  `Should Contain  ${x}  ${EMPTY}` (every string contains the empty string),
+  `Should Not Be Empty  ${TRUE}` (a constant is never empty), `Should Be Empty  ${EMPTY}`,
+  and `Length Should Be` against a fixed length (the empty literal, or a subject assigned a
+  literal by an immediately-preceding `Set Variable`). Two free variables, a runtime-computed
+  length, and `Should Be True  ${EMPTY}` (that is `R6`/`C6`) are excluded, and `C44` is
+  suppressed where `C5`/`C6`/`R6` already own the line. (#53)
+
+### Changed
+
+- `C5` broadened (#47): a `Set Variable If` with a constant-true guard whose assigned value
+  flows into the expected side of a later `Should Be Equal` is now flagged. The oracle is
+  pinned to a constant the test fixed, so the comparison is a tautology. A runtime-variable
+  guard is normal branching and stays silent, and the rule fires only when the assigned name
+  is proven to reach an assertion's expected argument.
+
 ## [0.3.0] - 2026-06-28
 
 ### Added
