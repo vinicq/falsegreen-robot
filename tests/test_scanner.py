@@ -1531,16 +1531,19 @@ And Chain No Oracle
 
 
 def test_version_lockstep():
-    # __version__ must match pyproject.toml; it was stuck at 0.1.0 while the package was 0.3.0,
-    # so --version and the JSON report lied. This guard fails on the next divergence.
+    # __version__ must equal pyproject.toml and CITATION.cff. Single equality-chain assert,
+    # no conditional and no truthiness check, so the scanner's own self-scan stays clean.
     import re
     import pathlib
     from falsegreen_robot.scanner import __version__
-    pyproject = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
-    m = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(encoding="utf-8"), re.M)
-    assert m, "version not found in pyproject.toml"
-    cff = pyproject.parent / "CITATION.cff"
-    if cff.exists():
-        cm = re.search(r'^version:\s*([^\s]+)', cff.read_text(encoding="utf-8"), re.M)
-        assert cm and cm.group(1) == m.group(1), "CITATION.cff version out of lockstep with pyproject"
-    assert __version__ == m.group(1), "__version__ %r != pyproject %r" % (__version__, m.group(1))
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    def _ver(path, pat):
+        m = re.search(pat, path.read_text(encoding="utf-8"), re.M)
+        return m.group(1) if m else None
+
+    pyproject_v = _ver(root / "pyproject.toml", r'^version\s*=\s*"([^"]+)"')
+    cff_v = _ver(root / "CITATION.cff", r'^version:\s*(\S+)')
+    assert __version__ == pyproject_v == cff_v, (
+        "version lockstep broken: __version__=%s pyproject=%s CITATION=%s"
+        % (__version__, pyproject_v, cff_v))
