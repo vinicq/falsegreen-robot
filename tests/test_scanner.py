@@ -824,6 +824,34 @@ def test_pl9_in_catalog_and_fix_hints():
     assert "PL9" in CASES and "PL9" in FIX_HINTS
 
 
+# --- #52: PL9 walks nested *.args, skipping IGNORED_DIRS ----------------------
+
+def test_config_audit_flags_skiponfailure_in_nested_args(tmp_path):
+    # A *.args below the root (tests/sub/run.args) must still be read - the audit
+    # walks recursively, not just the base dir.
+    sub = tmp_path / "tests" / "sub"
+    sub.mkdir(parents=True)
+    (sub / "run.args").write_text("--skiponfailure flaky\n", encoding="utf-8")
+    assert {f.code for f in audit_config(str(tmp_path))} == {"PL9"}
+
+
+def test_config_audit_clean_nested_args(tmp_path):
+    # Same nested location, but no skiponfailure/noncritical -> clean.
+    sub = tmp_path / "tests" / "sub"
+    sub.mkdir(parents=True)
+    (sub / "run.args").write_text("--outputdir out\n--loglevel DEBUG\n", encoding="utf-8")
+    assert audit_config(str(tmp_path)) == []
+
+
+def test_config_audit_skips_ignored_dirs_args(tmp_path):
+    # An argfile inside an IGNORED_DIR (results/) is an artifact, not run config -
+    # it must be skipped even though it carries the flag.
+    res = tmp_path / "results"
+    res.mkdir()
+    (res / "x.args").write_text("--skiponfailure flaky\n", encoding="utf-8")
+    assert audit_config(str(tmp_path)) == []
+
+
 # --- output parity: SARIF / JUnit / baseline (issue #9) ----------------------
 
 # A two-finding suite: C2 (high) in the empty test, plus C16 (low) and C7 (high)

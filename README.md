@@ -86,7 +86,25 @@ rffalsegreen --baseline          # scan, suppressing everything in the baseline
 
 Both flags take an optional path (default `.falsegreen-baseline.json`). The baseline fingerprints a finding by content - `sha1(relative path, code, test/keyword name, detail)` with no line number - so it survives edits that shift a test up or down the file. Commit the baseline so CI sees the same set. A new false-green that is not in the baseline still fails the run; shrink the baseline as you fix the recorded ones.
 
-`--config-audit` is a separate mode: instead of scanning suites, it reads the Robot run config (`robot.toml`, `pyproject.toml` `[tool.robot]`, `*.args` argument files) and reports `PL9` - a `--skiponfailure` / `--noncritical` option that turns a failing test into a non-fatal pass (legacy, removed in RF 4+). The per-file scan cannot see run config.
+### pre-commit
+
+Run the scanner as a [pre-commit](https://pre-commit.com) hook so a false-green test is caught
+before it lands. Add to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/vinicq/robotframework-falsegreen
+    rev: v0.3.0
+    hooks:
+      - id: rffalsegreen
+```
+
+The hook scopes to `.robot`/`.resource` files and passes the staged paths to the scanner, so it
+never re-scans `results/`/`output/`. It honors the exit codes (`0` clean, `10` low only, `20` high),
+so a high-confidence finding fails the commit. To run it on demand against only the staged files
+without committing, use `pre-commit run rffalsegreen`.
+
+`--config-audit` is a separate mode: instead of scanning suites, it reads the Robot run config (`robot.toml`, `pyproject.toml` `[tool.robot]`, and `*.args` argument files found recursively, skipping ignored directories like `results/`/`output/`) and reports `PL9` - a `--skiponfailure` / `--noncritical` option that turns a failing test into a non-fatal pass (legacy, removed in RF 4+). The per-file scan cannot see run config.
 
 For the layer no static scan reaches (does a green test fail when the code is wrong?), Robot has no standard mutation tester, so that check is manual review; the semantic [falsegreen-skill](https://github.com/vinicq/falsegreen-skill) covers the intent-level cases.
 
