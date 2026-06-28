@@ -34,7 +34,7 @@ CASES = {
     "C2":  ("empty test case, task, or keyword (no keywords run)", "high", "J1"),
     "C2b": ("runs keywords but no verification keyword (no oracle)", "low", "J1"),
     "C3":  ("Run Keyword And Ignore Error/Return Status, or a TRY/EXCEPT that swallows the failure, leaves the status never asserted", "high", "J1"),
-    "C5":  ("always-true check (Should Be True ${TRUE} / Should Be Equal with equal literals)", "high", "J2"),
+    "C5":  ("always-true check (Should Be True ${TRUE} / Should Be Equal with equal literals, or a constant-true Set Variable If feeding the expected side)", "high", "J2"),
     "C6":  ("weak check — Should Be True on a bare variable (truthiness only, not a comparison)", "low", "J4"),
     "C7":  ("self-compare (Should Be Equal ${x} ${x})", "high", "J2"),
     "C9":  ("Run Keyword And Expect Error with a catch-all pattern (*, GLOB:*, or REGEXP:.* accepts any error)", "low", "J4"),
@@ -52,6 +52,7 @@ CASES = {
     "R5":  ("[Template] with no data rows — the templated test is generated with zero cases", "high", "J1"),
     "R6":  ("Should Be True on a string literal (not an expression) — a non-empty string is always truthy, so it never fails", "low", "J4"),
     "R7":  ("templated test whose in-file [Template] keyword contains no verification — every generated case runs without an oracle", "low", "J1"),
+    "C44": ("library assertion provably true for any value (Should Contain ${EMPTY}, Should Not Be Empty ${TRUE}, Length Should Be tautology)", "high", "J2"),
     # --- diagnostic group (maintainability; default off, opt-in via --diagnostics) ---
     "D2":  ("control flow (IF/FOR/WHILE/TRY) at the test/task level — the guide advises against it", "off", "J4"),
     # --- coupling group (structure; default off, opt-in) ----------------------
@@ -101,6 +102,7 @@ FIX_HINTS = {
     "R5":  "add data rows to the [Template], or remove the template",
     "R6":  "pass a real expression (${x} > 0), not a bare string literal",
     "R7":  "add a verification keyword to the [Template] keyword, or template a verifier",
+    "C44": "assert a meaningful value, not one always satisfied",
     "D2":  "move control flow into a keyword; keep the test case flat",
     "M2":  "split the long test into focused cases or extract keywords",
     "PL9": "remove --skiponfailure/--noncritical so a failing test fails the run",
@@ -209,12 +211,19 @@ def _strip_library_prefix(keyword, local_keywords=None):
     return keyword
 
 
-def is_verification(keyword, args, local_keywords=None):
+def is_verification(keyword, args, local_keywords=None, extra_verify=None):
     """True if this keyword call verifies an expected result (is an oracle)."""
     if keyword is None:
         return False
     keyword = _strip_library_prefix(keyword, local_keywords)
     n = _norm(keyword)
+    # Config-declared custom verifiers (#54): match the FULL normalized keyword name
+    # against the user substrings, so `Expect Response Ok` matches `expect response`.
+    # Anchored to the whole name, not a split leaf (no L1 leaf-match). Opt-in: an
+    # empty set leaves behavior byte-identical, and this only ever SUPPRESSES a
+    # false positive, never creates a finding.
+    if extra_verify and any(pat in n for pat in extra_verify):
+        return True
     if "should" in n:
         return True                              # BuiltIn/Collections/String/Selenium/...
     if n == "run keyword and expect error":
@@ -232,7 +241,7 @@ def is_verification(keyword, args, local_keywords=None):
     if n == "wait until keyword succeeds":
         inner = list(args or ())[2:]
         if inner:
-            return is_verification(inner[0], inner[1:], local_keywords)
+            return is_verification(inner[0], inner[1:], local_keywords, extra_verify)
         return False
     if n.startswith("get ") and any(a in BROWSER_OPS for a in (args or ())):
         return True                              # Browser assertion engine: Get ... == expected
@@ -249,7 +258,7 @@ def is_verification(keyword, args, local_keywords=None):
     # on the AND separator and check each segment's first token as a nested call.
     if n == "run keywords":
         for seg_kw, seg_args in _run_keywords_segments(args):
-            if is_verification(seg_kw, seg_args, local_keywords):
+            if is_verification(seg_kw, seg_args, local_keywords, extra_verify):
                 return True
     return False
 
@@ -335,6 +344,120 @@ def _swallow_status_unused(calls):
         if not used_later:
             swallows.append(getattr(c, "lineno", 0) or 0)
     return swallows[0] if swallows else None
+
+
+def _expected_names(call):
+    """Variable names referenced in the EXPECTED slot of a Should Be Equal call -
+    its second positional argument (`Should Be Equal    ${actual}    ${expected}`),
+    lower-cased and bare. Named args (key=value) are skipped so the slot stays
+    positional."""
+    positional = [a for a in (getattr(call, "args", None) or ())
+                  if "=" not in (a or "").split("}")[0]]
+    if len(positional) < 2:
+        return set()
+    names = set()
+    for m in _VAR_NAME_RE.finditer(positional[1] or ""):
+        names.add(_norm(m.group(1)))
+    return names
+
+
+def _set_variable_if_pins_oracle(calls):
+    """C5 (#47): a `Set Variable If` with a constant-true guard (first arg in
+    _CONST_TRUE_GUARDS) whose assigned variable flows into the EXPECTED side of a
+    later `Should Be Equal`. The oracle is then pinned to a constant the test fixed,
+    so the assertion is tautological. Yields the lineno of each such Set Variable If.
+
+    Both conditions are required: (1) the guard is a literal constant-true, AND (2)
+    the assigned name actually reaches an assertion's expected argument. A runtime
+    variable guard is normal branching and stays silent; if the flow cannot be
+    proven (the name never lands on an expected slot), stay silent."""
+    for idx, c in enumerate(calls):
+        if type(c).__name__ != "KeywordCall" or _norm(getattr(c, "keyword", "")) != "set variable if":
+            continue
+        guard = next(iter(getattr(c, "args", None) or ()), "")
+        if _norm(guard) not in _CONST_TRUE_GUARDS:
+            continue
+        assigned = _assigned_names(c)
+        if not assigned:
+            continue
+        for later in calls[idx + 1:]:
+            if type(later).__name__ != "KeywordCall" or _norm(getattr(later, "keyword", "")) != "should be equal":
+                continue
+            if assigned & _expected_names(later):
+                yield getattr(c, "lineno", 0) or 0
+                break
+
+
+_EMPTY_STR_LITERALS = {"${empty}", '""', "''", ""}
+
+
+def _is_empty_literal(arg):
+    """True for an argument Robot evaluates to the empty string: ${EMPTY}, a literal
+    "" / '' , or a blank cell. Not a variable that merely could be empty at runtime."""
+    return _norm(arg) in _EMPTY_STR_LITERALS
+
+
+def _is_nonempty_literal(arg):
+    """True for a non-empty plain literal (no variable, has text) - or a constant-true
+    guard (${TRUE}/true/1), which is never empty either. Used by C44 form 2."""
+    s = (arg or "").strip()
+    if not s:
+        return False
+    if _norm(s) in _CONST_TRUE_GUARDS:
+        return True
+    return "{" not in s and "}" not in s
+
+
+def _vacuous_library_assertion(calls):
+    """C44 (#53): a library assertion provably true for ANY runtime value. Yields the
+    lineno of each high-precision vacuous form:
+
+    1. Should Contain    ${x}    ${EMPTY}   - every string contains the empty string.
+    2. Should Not Be Empty    ${TRUE}       - a non-empty literal / constant is never empty.
+    3. Should Be Empty    ${EMPTY}          - the empty literal is always empty.
+    4. Length Should Be    ${EMPTY}    0, OR a Length Should Be whose subject was
+       assigned by an immediately-preceding literal Set Variable (no intervening
+       reassignment) and whose expected equals that literal's length.
+
+    Excluded (FP ceiling): two free variables, a runtime-computed length, and
+    Should Be True ${EMPTY} (that is R6/C6, handled elsewhere). The dead-line
+    discipline (suppress where C5/C6/R6 already own the line) is applied by the caller."""
+    for idx, c in enumerate(calls):
+        if type(c).__name__ != "KeywordCall":
+            continue
+        kw = _norm(getattr(c, "keyword", ""))
+        args = list(getattr(c, "args", None) or [])
+        ln = getattr(c, "lineno", 0) or 0
+        if kw == "should contain" and len(args) >= 2 and _is_empty_literal(args[1]):
+            yield ln
+        elif kw == "should not be empty" and len(args) >= 1 and _is_nonempty_literal(args[0]):
+            yield ln
+        elif kw == "should be empty" and len(args) >= 1 and _is_empty_literal(args[0]):
+            yield ln
+        elif kw == "length should be" and len(args) >= 2:
+            subject, expected = args[0], args[1]
+            if _is_empty_literal(subject) and expected.strip() == "0":
+                yield ln
+                continue
+            # Subject assigned by an immediately-preceding literal Set Variable, with
+            # no intervening reassignment, and expected == that literal's length.
+            subj_names = {_norm(m.group(1)) for m in _VAR_NAME_RE.finditer(subject or "")}
+            if len(subj_names) != 1 or idx == 0:
+                continue
+            prev = calls[idx - 1]
+            if (type(prev).__name__ == "KeywordCall"
+                    and _norm(getattr(prev, "keyword", "")) == "set variable"):
+                prev_assigned = _assigned_names(prev)
+                prev_args = list(getattr(prev, "args", None) or [])
+                # literal value only: one arg, no variable in it (a keyword-call or
+                # Set Variable If would not be a Set Variable; a variable value is runtime)
+                if (subj_names <= prev_assigned and len(prev_args) == 1
+                        and "{" not in (prev_args[0] or "") and "}" not in (prev_args[0] or "")):
+                    try:
+                        if expected.strip() == str(len(prev_args[0])):
+                            yield ln
+                    except (TypeError, ValueError):
+                        pass
 
 
 def _looks_constant_true(arg):
@@ -425,11 +548,14 @@ def _has_control_block(testcase):
                for i in (getattr(testcase, "body", None) or []))
 
 
-def _rkif_verifies(call):
+def _rkif_verifies(call, extra_verify=None):
     """A `Run Keyword If`/`Unless` whose arguments name a verification keyword -
     that is a conditional verification (may not run)."""
     if _norm(getattr(call, "keyword", None)) in ("run keyword if", "run keyword unless"):
-        return any("should" in _norm(a) for a in (getattr(call, "args", None) or ()))
+        for a in (getattr(call, "args", None) or ()):
+            na = _norm(a)
+            if "should" in na or (extra_verify and any(p in na for p in extra_verify)):
+                return True
     return False
 
 
@@ -466,7 +592,7 @@ def _try_body_has_keyword(try_node):
     return any(type(st).__name__ == "KeywordCall" for st in (getattr(try_node, "body", None) or []))
 
 
-def _dead_verification_after_terminator(node, local_keywords=None):
+def _dead_verification_after_terminator(node, local_keywords=None, extra_verify=None):
     """Yield (lineno) for each verification keyword that sits AFTER a terminator in
     the same body block - a [Return]/Return statement, or a Fail/Pass Execution/
     Return From Keyword call. Nothing after the terminator runs, so a check there is
@@ -477,7 +603,7 @@ def _dead_verification_after_terminator(node, local_keywords=None):
     for item in body:
         cls = type(item).__name__
         if terminated and cls == "KeywordCall" and is_verification(
-                item.keyword, list(getattr(item, "args", []) or []), local_keywords):
+                item.keyword, list(getattr(item, "args", []) or []), local_keywords, extra_verify):
             yield getattr(item, "lineno", 0) or 0
         # A setting [Return]/ReturnSetting or a Return statement ends the block.
         if cls in ("ReturnSetting", "Return", "ReturnStatement"):
@@ -490,7 +616,7 @@ def _dead_verification_after_terminator(node, local_keywords=None):
                 terminated = True
         # Recurse into control blocks (their own bodies are scanned independently).
         if hasattr(item, "body") and cls in ("If", "For", "While", "Try"):
-            yield from _dead_verification_after_terminator(item, local_keywords)
+            yield from _dead_verification_after_terminator(item, local_keywords, extra_verify)
 
 
 def _duplicate_template_rows(testcase):
@@ -542,11 +668,16 @@ def _name_implies_verification(name):
     return "should" in n or n.startswith(("verify", "assert", "validate"))
 
 
-def _call_level_smells(file, owner, calls, findings, local_keywords=None):
+def _call_level_smells(file, owner, calls, findings, local_keywords=None, extra_verify=None):
     """Per-call false-green checks shared by test cases, tasks, and user keywords:
     C5 (always-true), C7 (self-compare), C16 (Sleep). Returns whether any keyword
     call verifies something."""
     has_verification = False
+    # C5 (#47): a constant-true Set Variable If whose assigned value feeds the
+    # expected side of a later Should Be Equal pins the oracle to a fixed constant.
+    for svi_ln in _set_variable_if_pins_oracle(calls):
+        findings.append(Finding(file, svi_ln, owner, "C5",
+                                "Set Variable If with a constant-true guard pins the expected value"))
     for c in calls:
         kw, args = c.keyword, list(getattr(c, "args", []) or [])
         ln = getattr(c, "lineno", 0) or 0
@@ -593,12 +724,21 @@ def _call_level_smells(file, owner, calls, findings, local_keywords=None):
             findings.append(Finding(file, ln, owner, "C16", "Generate Random String is non-deterministic (no fixed seed)"))
         elif nk == "evaluate" and args and _EVAL_NONDET_RE.search(args[0] or ""):
             findings.append(Finding(file, ln, owner, "C16", "Evaluate body uses datetime/random/uuid (non-deterministic)"))
-        if is_verification(kw, args, local_keywords) or _rkif_verifies(c):
+        if is_verification(kw, args, local_keywords, extra_verify) or _rkif_verifies(c, extra_verify):
             has_verification = True
+    # C44 (#53): a library assertion provably true for any runtime value. Suppress
+    # where C5/C6/R6 already own the line (the dead-line discipline) - those codes
+    # take precedence on the same assertion. A C44 form is itself a verification.
+    owned = {f.line for f in findings if f.code in ("C5", "C6", "R6")}
+    for c44_ln in _vacuous_library_assertion(calls):
+        if c44_ln not in owned:
+            findings.append(Finding(file, c44_ln, owner, "C44",
+                                    "assertion is satisfied for any value"))
+        has_verification = True
     return has_verification
 
 
-def analyze_keyword(file, kw, findings, local_keywords=None):
+def analyze_keyword(file, kw, findings, local_keywords=None, extra_verify=None):
     """Analyze a User Keyword definition (.robot Keywords section or .resource).
     Flags call-level smells inside the body, and R2 when the keyword is named like a
     verifier but verifies nothing (a hollow oracle used by tests)."""
@@ -617,11 +757,11 @@ def analyze_keyword(file, kw, findings, local_keywords=None):
         findings.append(Finding(file, line, name, "R4"))
         return
 
-    has_verification = _call_level_smells(file, name, calls, findings, local_keywords)
+    has_verification = _call_level_smells(file, name, calls, findings, local_keywords, extra_verify)
 
     # C20: a verification after a [Return]/Return/Fail/Return From Keyword in the
     # same block is dead - it never runs.
-    for dead_ln in _dead_verification_after_terminator(kw, local_keywords):
+    for dead_ln in _dead_verification_after_terminator(kw, local_keywords, extra_verify):
         findings.append(Finding(file, dead_ln, name, "C20",
                                 "verification after a terminator never runs"))
 
@@ -635,15 +775,15 @@ def analyze_keyword(file, kw, findings, local_keywords=None):
         findings.append(Finding(file, line, name, "R2"))
 
 
-def _keyword_body_verifies(kw, local_keywords=None):
+def _keyword_body_verifies(kw, local_keywords=None, extra_verify=None):
     """True if a user keyword definition's body contains any verification keyword.
     Runs the shared call-level scan over the body and discards its findings - only
     the has_verification verdict matters here (used by R7)."""
     calls = list(_keyword_calls(kw))
-    return _call_level_smells("", "", calls, [], local_keywords)
+    return _call_level_smells("", "", calls, [], local_keywords, extra_verify)
 
 
-def analyze_testcase(file, tc, findings, keyword_index=None):
+def analyze_testcase(file, tc, findings, keyword_index=None, extra_verify=None, long_test=None):
     name = getattr(tc, "name", "") or ""
     line = getattr(tc, "lineno", 0) or 0
     calls = list(_keyword_calls(tc))
@@ -686,7 +826,7 @@ def analyze_testcase(file, tc, findings, keyword_index=None):
         # already flags the hollow oracle on the definition).
         elif keyword_index is not None and tmpl_kw in keyword_index:
             kw_def = keyword_index[tmpl_kw]
-            if (not _keyword_body_verifies(kw_def, local_keywords)
+            if (not _keyword_body_verifies(kw_def, local_keywords, extra_verify)
                     and not _name_implies_verification(getattr(kw_def, "name", "") or "")):
                 findings.append(Finding(file, line, name, "R7",
                                         "in-file [Template] keyword verifies nothing"))
@@ -710,17 +850,18 @@ def analyze_testcase(file, tc, findings, keyword_index=None):
         findings.append(Finding(file, line, name, "R4"))
         return
 
-    has_verification = _call_level_smells(file, name, calls, findings, local_keywords)
+    has_verification = _call_level_smells(file, name, calls, findings, local_keywords, extra_verify)
 
     # diagnostic/coupling group (off by default; emitted always, filtered in scan)
     if _has_control_block(tc):
         findings.append(Finding(file, line, name, "D2"))
-    if len(calls) > DIAGNOSTIC_THRESHOLDS["long_test_steps"]:
+    long_test_steps = long_test if long_test is not None else DIAGNOSTIC_THRESHOLDS["long_test_steps"]
+    if len(calls) > long_test_steps:
         findings.append(Finding(file, line, name, "M2", "%d steps" % len(calls)))
 
     # C20: a verification keyword after a terminator ([Return]/Fail/Pass Execution/
     # Return From Keyword) in the same block is a dead step - it never runs.
-    for dead_ln in _dead_verification_after_terminator(tc, local_keywords):
+    for dead_ln in _dead_verification_after_terminator(tc, local_keywords, extra_verify):
         findings.append(Finding(file, dead_ln, name, "C20",
                                 "verification after a terminator never runs"))
 
@@ -755,11 +896,11 @@ def analyze_testcase(file, tc, findings, keyword_index=None):
     # explicit: no if/else/for at the test-case level.
     top = _top_level_keyword_calls(tc)
     has_unconditional = any(
-        is_verification(c.keyword, list(getattr(c, "args", []) or []), local_keywords)
+        is_verification(c.keyword, list(getattr(c, "args", []) or []), local_keywords, extra_verify)
         for c in top
         if _norm(c.keyword) not in ("run keyword if", "run keyword unless")
     )
-    if not has_unconditional and (_has_control_block(tc) or any(_rkif_verifies(c) for c in calls)):
+    if not has_unconditional and (_has_control_block(tc) or any(_rkif_verifies(c, extra_verify) for c in calls)):
         findings.append(Finding(file, line, name, "C21"))
 
 
@@ -827,7 +968,7 @@ def parse_inline_ignores(source):
     return ignores
 
 
-def analyze_file(path):
+def analyze_file(path, extra_verify=None, long_test=None):
     findings = []
     try:
         from robot.api import get_model
@@ -874,14 +1015,14 @@ def analyze_file(path):
     class _V(ModelVisitor):
         def visit_TestCase(self, node):
             if not is_resource:
-                analyze_testcase(path, node, self_findings, keyword_index)
+                analyze_testcase(path, node, self_findings, keyword_index, extra_verify, long_test)
 
         def visit_Task(self, node):  # RPA suites use *** Tasks ***, not *** Test Cases ***
             if not is_resource:
-                analyze_testcase(path, node, self_findings, keyword_index)
+                analyze_testcase(path, node, self_findings, keyword_index, extra_verify, long_test)
 
         def visit_Keyword(self, node):  # user keyword defs in .robot Keywords + .resource
-            analyze_keyword(path, node, self_findings, local_keywords)
+            analyze_keyword(path, node, self_findings, local_keywords, extra_verify)
 
     _V().visit(model)
 
@@ -938,11 +1079,11 @@ def _eff_conf(code):
     return "low" if c == "off" else c
 
 
-def scan(paths, disable=None, diagnostics=False, baseline=None):
+def scan(paths, disable=None, diagnostics=False, baseline=None, extra_verify=None, long_test=None):
     disable = disable or set()
     out = []
     for f in discover(paths):
-        for finding in analyze_file(f):
+        for finding in analyze_file(f, extra_verify, long_test):
             conf = CASES[finding.code][1]
             if finding.code in disable:
                 continue
@@ -1189,6 +1330,59 @@ def _read_toml_file(path):
         return None
 
 
+# Project config file (#50): [tool.falsegreen] in pyproject.toml, else the whole
+# .falsegreen.toml root table. First found wins (no merge). Distinct from
+# --config-audit, which reads the Robot RUN config ([tool.robot]). Only these
+# four keys are honored; CLI flags override/extend.
+_CONFIG_KEYS = {"disable", "diagnostics", "long_test", "verify_keywords"}
+
+
+def load_project_config(start=None):
+    """Read tool config from `[tool.falsegreen]` in pyproject.toml, or the whole-file
+    root table of `.falsegreen.toml`. First found wins (no merge). Returns a dict with
+    `disable` (set of codes), `diagnostics` (bool), `long_test` (int or None) and
+    `verify_keywords` (list of str). Unknown keys / codes warn to stderr (warn, not
+    fail). Returns the empty-default dict when no file is found or TOML is unreadable."""
+    base = start or os.getcwd()
+    out = {"disable": set(), "diagnostics": False, "long_test": None, "verify_keywords": []}
+    section = None
+    pyproject = os.path.join(base, "pyproject.toml")
+    if os.path.isfile(pyproject):
+        data = _read_toml_file(pyproject)
+        if data is not None:
+            tool_fg = data.get("tool", {}).get("falsegreen")
+            if isinstance(tool_fg, dict):
+                section = tool_fg
+    if section is None:
+        dotfile = os.path.join(base, ".falsegreen.toml")
+        if os.path.isfile(dotfile):
+            data = _read_toml_file(dotfile)
+            if isinstance(data, dict):
+                section = data
+    if section is None:
+        return out
+
+    for key in section:
+        if key not in _CONFIG_KEYS:
+            sys.stderr.write("rffalsegreen: unknown config key '%s'\n" % key)
+    disable = section.get("disable")
+    if isinstance(disable, list):
+        for code in disable:
+            if code in CASES:
+                out["disable"].add(code)
+            else:
+                sys.stderr.write("rffalsegreen: unknown code '%s'\n" % code)
+    if isinstance(section.get("diagnostics"), bool):
+        out["diagnostics"] = section["diagnostics"]
+    long_test = section.get("long_test")
+    if isinstance(long_test, int) and not isinstance(long_test, bool):
+        out["long_test"] = long_test
+    verify = section.get("verify_keywords")
+    if isinstance(verify, list):
+        out["verify_keywords"] = [str(v) for v in verify]
+    return out
+
+
 def audit_config(start=None):
     """Project-layer audit: read the Robot run config (robot.toml, pyproject
     [tool.robot]/[tool.robotframework], *.args argument files) and report PL9 -
@@ -1274,11 +1468,21 @@ def main(argv=None):
                    help="record all current findings to PATH as a baseline, then exit 0")
     p.add_argument("--version", action="version", version=__version__)
     args = p.parse_args(argv)
-    disable = {c.strip() for c in args.disable.split(",") if c.strip()}
     fmt = "json" if args.json else args.format
 
+    # Project config file (#50): [tool.falsegreen] / .falsegreen.toml. CLI flags
+    # override/extend - disable is additive, diagnostics is OR, long_test/verify
+    # come from the file. Distinct from --config-audit (the Robot RUN config).
+    cfg_base = next((d for d in (args.paths or ["."]) if os.path.isdir(d)), os.getcwd())
+    cfg = load_project_config(cfg_base)
+    disable = {c.strip() for c in args.disable.split(",") if c.strip()} | cfg["disable"]
+    diagnostics = args.diagnostics or cfg["diagnostics"]
+    long_test = cfg["long_test"]
+    extra_verify = {_norm(v) for v in cfg["verify_keywords"] if _norm(v)} or None
+
     if args.write_baseline is not None:
-        findings = scan(args.paths or ["."], disable=disable, diagnostics=args.diagnostics)
+        findings = scan(args.paths or ["."], disable=disable, diagnostics=diagnostics,
+                        extra_verify=extra_verify, long_test=long_test)
         n = write_baseline(args.write_baseline, findings)
         sys.stderr.write("rffalsegreen: wrote %d fingerprint(s) to %s\n"
                          % (n, args.write_baseline))
@@ -1291,8 +1495,8 @@ def main(argv=None):
         return 10 if findings else 0
 
     baseline = load_baseline(args.baseline) if args.baseline else None
-    findings = scan(args.paths or ["."], disable=disable, diagnostics=args.diagnostics,
-                    baseline=baseline)
+    findings = scan(args.paths or ["."], disable=disable, diagnostics=diagnostics,
+                    baseline=baseline, extra_verify=extra_verify, long_test=long_test)
     _emit(RENDERERS[fmt](findings), args.output, fmt)
     if any(_eff_conf(f.code) == "high" for f in findings):
         return 20

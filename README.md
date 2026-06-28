@@ -116,6 +116,7 @@ RESTinstance schema keywords, DatabaseLibrary `Row Count Should Be Equal`, custo
 | C23 | low  | hard-coded IP-address URL in test data (`http://10.0.0.5:8080`) — environment coupling |
 | C32 | low  | skipped test (`robot:skip` / `Skip`) |
 | C37 | low  | duplicate data row in a `[Template]` — the same scenario runs twice, no extra coverage |
+| C44 | high | library assertion provably true for any value (`Should Contain  ${x}  ${EMPTY}`, `Should Not Be Empty  ${TRUE}`, `Length Should Be` tautology) |
 | CC  | low  | commented-out verification keyword (`# Should Be Equal ...`) — the oracle is switched off |
 | R1  | high | `Pass Execution` forces the test green regardless of any check |
 | R2  | low  | user keyword named like a verifier (`Verify`/`Assert`/`Should`...) but its body verifies nothing — a hollow oracle |
