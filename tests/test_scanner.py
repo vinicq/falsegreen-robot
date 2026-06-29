@@ -2422,3 +2422,45 @@ def test_format_robot_via_cli(tmp_path):
     assert rc == 20  # C2 is high
     body = out.read_text(encoding="utf-8")
     assert "C2" in body
+
+
+# --- Global output dedup (file, line, code, detail), #64 ---------------------
+
+def test_global_dedup_collapses_true_duplicate(tmp_path, monkeypatch):
+    """Two passes emitting the same (file, line, code, detail) yield ONE finding.
+    Robot detectors break/continue to avoid double-firing today, so the dedup is a
+    safety net: force a duplicate at the analyze layer and assert scan collapses it,
+    matching the Python reference scanner."""
+    import falsegreen_robot.scanner as sc
+    body = """*** Test Cases ***
+T
+    Sleep    1s
+"""
+    f = tmp_path / "t.robot"
+    f.write_text(body, encoding="utf-8")
+
+    def fake_analyze_file(path, *a, **k):
+        return [sc.Finding(str(f), 3, "T", "C16", ""),
+                sc.Finding(str(f), 3, "T", "C16", "")]
+
+    monkeypatch.setattr(sc, "analyze_file", fake_analyze_file)
+    out = sc.scan([str(f)])
+    assert len([x for x in out if x.code == "C16" and x.line == 3]) == 1
+
+
+def test_global_dedup_keeps_two_codes_on_same_line(tmp_path):
+    """Two independent detector families fire on the same LIVE line and both
+    survive: `Run Keyword And Expect Error    *    Get    http://10.0.0.1` is both
+    C9 (catch-all error pattern) and C23 (hard-coded IP URL). Neither is gated by
+    dead-line suppression, so this is a legitimate same-line multi-code per the
+    contract, mirroring the JS sibling test (C20+C16). The dedup key includes the
+    code, so neither collapses the other."""
+    body = """*** Test Cases ***
+T
+    Run Keyword And Expect Error    *    Get    http://10.0.0.1
+"""
+    f = tmp_path / "t.robot"
+    f.write_text(body, encoding="utf-8")
+    on_line_3 = {x.code for x in scan([str(f)]) if x.line == 3}
+    assert "C9" in on_line_3
+    assert "C23" in on_line_3
