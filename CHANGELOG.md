@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-29
+
 ### Added
 
 - `R8` (high) / `R8b` (low) (#74): the only verification lives in a fixture, not the test
