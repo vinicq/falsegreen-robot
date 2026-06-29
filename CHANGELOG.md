@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-29
+
+### Fixed
+
+- Global output dedup (#64): `scan` now collapses identical findings on
+  `(file, line, code, detail)` before emitting, matching the Python reference
+  scanner. The local `seen` set in `_duplicate_template_rows` stays as C37
+  detector logic; this is a separate output-level collapse and the safety net for
+  any pass that double-emits on one line. Two different codes on the same line
+  both survive, since the key includes the code: distinct false-green mechanisms
+  on one line stay distinct.
+
 ## [0.6.0] - 2026-06-29
 
 ### Added

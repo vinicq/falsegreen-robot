@@ -20,7 +20,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-__version__ = "0.6.0"  # keep in lockstep with pyproject.toml (test_version_lockstep enforces it)
+__version__ = "0.6.1"  # keep in lockstep with pyproject.toml (test_version_lockstep enforces it)
 TOOL_URI = "https://github.com/vinicq/robotframework-falsegreen"
 
 # --- case catalog. code -> (title, confidence, judgment J1-J6) -------------
@@ -1375,6 +1375,14 @@ def _eff_conf(code):
 def scan(paths, disable=None, diagnostics=False, baseline=None, extra_verify=None, long_test=None):
     disable = disable or set()
     out = []
+    # Global output dedup on (file, line, code, detail), matching the Python
+    # reference scanner (falsegreen scanner.py). Collapses true duplicates that
+    # overlapping detector passes can emit on the same line; the key includes
+    # `code`, so two different codes on the same line both survive (distinct
+    # mechanisms are legitimate per the shared multiplicity contract, #64). The
+    # local C37 row-dedup in _duplicate_template_rows is detector logic, separate
+    # from this output-level collapse.
+    seen = set()
     for f in discover(paths):
         for finding in analyze_file(f, extra_verify, long_test):
             conf = CASES[finding.code][1]
@@ -1382,6 +1390,10 @@ def scan(paths, disable=None, diagnostics=False, baseline=None, extra_verify=Non
                 continue
             if conf == "off" and not diagnostics:
                 continue
+            key = (finding.file, finding.line, finding.code, finding.detail)
+            if key in seen:
+                continue
+            seen.add(key)
             out.append(finding)
     if baseline:
         out = [a for a in out if fingerprint(a) not in baseline]
