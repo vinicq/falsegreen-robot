@@ -17,7 +17,30 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    # Fail the release before publishing if the tag, pyproject, scanner __version__,
+    # CITATION, and the CHANGELOG disagree. An OIDC publish of a mismatched version is
+    # unrecoverable (#95).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version parity (tag == pyproject == __version__ == CITATION == CHANGELOG)
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          dunder=$(grep -m1 '__version__' src/falsegreen_robot/scanner.py | cut -d'"' -f2)
+          cff=$(grep -m1 '^version:' CITATION.cff | cut -d' ' -f2)
+          fail=0
+          for pair in "pyproject:$manifest" "__version__:$dunder" "CITATION:$cff"; do
+            name="${pair%%:*}"; val="${pair#*:}"
+            [ "$tag" = "$val" ] || { echo "::error::tag ${GITHUB_REF_NAME} != ${name} ${val}"; fail=1; }
+          done
+          grep -qF "## [$manifest]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no section for $manifest"; fail=1; }
+          [ "$fail" = 0 ] && echo "version parity OK: $manifest"
+          exit $fail
+
   build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
